@@ -1,313 +1,63 @@
-<div align="center">
+# PS3Eye-VirtualCam (Intel)
 
-# 📷 PS3 Camera macOS Driver
+An Intel/x86_64 build of [BH2VOQ/PS3-Camera-macOS-Driver](https://github.com/BH2VOQ/PS3-Camera-macOS-Driver), which turns a PlayStation 3 Eye camera into a system-wide macOS virtual camera. The upstream project only ships an Apple Silicon (arm64) build; this fork replaces the arm64-only static `libusb` with a Homebrew-linked build so it compiles and runs on Intel Macs and Intel-based Hackintosh systems.
 
-**Use a PlayStation 3 Eye as a system-wide camera on Apple Silicon Macs.**
+![Platform](https://img.shields.io/badge/platform-macOS%20Intel%20%2F%20Hackintosh-lightgrey?style=flat-square)
+![License](https://img.shields.io/badge/license-GPLv2-blue?style=flat-square)
 
-A userspace macOS camera bridge built with `libusb + PS3EYEDriver + CoreMediaIO`, feeding frames into **OBS Virtual Camera** for QuickTime, browsers, conferencing apps, streaming software, and more.
+## What it does
 
-[![Platform](https://img.shields.io/badge/platform-macOS%20Apple%20Silicon-lightgrey?style=flat-square)]()
-[![License](https://img.shields.io/badge/license-GPLv2-blue?style=flat-square)](LICENSE)
-[![Build](https://img.shields.io/badge/build-macOS%20CI-success?style=flat-square)]()
+Exposes the PS3 Eye as a standard system camera — usable in Zoom, Discord, Teams, browsers, QuickTime, and anything else that lists cameras — with no kernel extension. Everything runs in userspace via `libusb`, feeding frames into the OBS Virtual Camera's CoreMediaIO extension.
 
-**English** | [简体中文](README.zh-CN.md)
+## Why a fork was needed
 
-</div>
+Upstream ships a static `libusb-1.0.a` built only for arm64 and hard-codes `-arch arm64` in `build.sh`. None of the actual source (`ps3eye-feed.mm`, `ps3eye.cpp`, the menu bar app) contains any architecture-specific code — it's plain C++/Objective-C. The only change required was to `build.sh`:
 
----
+- Removed the `-arch arm64` flag.
+- Replaced the vendored static `libusb-1.0.a` with `pkg-config --cflags/--libs libusb-1.0` against a Homebrew-installed `libusb`.
+
+Everything else (`build-app.sh`, `install-agent.sh`, the menu app, the feeder) is unchanged from upstream.
 
 ## How it works
 
-The PS3 Eye has no modern native macOS driver. This project communicates with the OV534/OV772x hardware directly from userspace instead of installing a kernel extension.
+1. `ps3eye-feed` (a small background process, installed as a LaunchAgent) captures frames from the camera via `libusb` and writes them directly into the system's CoreMediaIO camera extension — the one OBS Studio installs the first time it's launched.
+2. The menu bar app (`PS3-Camera-macOS-Driver.app`) toggles the physical camera on/off and self-installs on first launch (copies the feeder to `~/Library/Application Support` and registers the LaunchAgent) — no need to manually run `install-agent.sh` if you use the app.
+3. OBS Studio does **not** need to stay open. It's only required once, to register the "OBS Virtual Camera" device with the system.
 
-```text
-PS3 Eye
-  │ USB / libusb
-  ▼
-PS3EYEDriver
-  │ 640×480 @ 30 fps
-  ▼
-ps3eye-feed
-  │ BGR → NV12
-  │ CoreMediaIO / CMSimpleQueue
-  ▼
-OBS Camera Extension
-  ▼
-OBS Virtual Camera
-  ├─ QuickTime
-  ├─ Browsers
-  ├─ Discord / Zoom / Teams
-  ├─ OBS
-  └─ Other macOS camera apps
-```
+## Requirements
 
-`src/ps3eye-feed.mm` is the core feeder. It captures PS3 Eye frames through the bundled PS3EYEDriver and statically linked libusb, converts BGR frames to NV12, and pushes them into the OBS Camera Extension sink stream through CoreMediaIO.
+- Intel (x86_64) Mac, or an x86_64 Hackintosh
+- macOS 12.3 or later (minimum for the Camera Extension API)
+- Xcode Command Line Tools (`xcode-select --install`)
+- Homebrew, with `brew install libusb pkg-config`
+- OBS Studio, installed and launched at least once, with "OBS Virtual Camera" approved by the system
 
-Applications only need to select:
+## Build
 
-```text
-OBS Virtual Camera
-```
-
-### Capture defaults
-
-- Resolution: `640×480`
-- Frame rate: `30 fps`
-- Auto gain: enabled
-- Auto white balance: enabled
-- Brightness: adjusted for practical macOS use
-
-## Why manual camera control is used
-
-Earlier versions attempted automatic consumer detection using CoreMediaIO running state, AVFoundation usage state, sink queue activity, and periodic sink stop/reopen probing.
-
-Those signals are not reliable enough with OBS Camera Extension. In real use they caused the camera to shut down about every ten seconds and immediately reconnect.
-
-The current design therefore prioritizes stability:
-
-> **The feeder stays resident in the background, while the physical PS3 Eye is OFF by default. You enable or disable the camera manually from the menu bar.**
-
-## Why disabling the camera restarts the feeder
-
-The inherited PS3EYEDriver/libusb stop path has a known risk where transfer cleanup can run from the libusb event thread and trigger mutex assertions or a self-deadlock.
-
-To avoid repeatedly calling the risky `cam->stop()` path under load, disabling the camera works like this:
-
-```text
-Menu bar writes OFF
-      ↓
-feeder detects OFF
-      ↓
-LED turns off
-      ↓
-feeder exits through the safe path
-      ↓
-LaunchAgent relaunches feeder
-      ↓
-standby with the physical camera OFF
-```
-
----
-
-# Usage
-
-## 1. Requirements
-
-You need:
-
-- Apple Silicon Mac
-- macOS
-- PlayStation 3 Eye camera
-- OBS Studio
-- Xcode Command Line Tools when building from source
-
-Install the command line tools with:
+> **Note:** you can skip this whole section by downloading the pre-built app from the [latest release](../../releases/latest) instead.
 
 ```bash
-xcode-select --install
-```
-
-Install OBS Studio, launch it at least once, and make sure **OBS Virtual Camera** is enabled and approved by macOS.
-
-## 2. Build and install
-
-```bash
-git clone https://github.com/BH2VOQ/PS3Eye-VirtualCam.git
-cd PS3Eye-VirtualCam
+git clone https://github.com/<your-username>/PS3Eye-VirtualCam-Intel.git
+cd PS3Eye-VirtualCam-Intel
 ./build.sh
-./scripts/install-agent.sh
 ./scripts/build-app.sh
 ```
 
-The background feeder is installed to:
+The finished app is at `dist/PS3-Camera-macOS-Driver.app`. Copy it to `/Applications`, open it (right-click → Open if Gatekeeper blocks it, since the build is ad-hoc signed, not notarized), then click **Enable Camera** in the menu bar.
 
-```text
-~/Library/Application Support/PS3Eye-VirtualCam/ps3eye-feed
-```
+## Troubleshooting
 
-Logs are written to:
+- Live log: `tail -f "$HOME/Library/Logs/PS3Eye-VirtualCam/feed.log"`
+- Reinstall the LaunchAgent: `./scripts/install-agent.sh`
+- Restart the feeder: `launchctl kickstart -k "gui/$(id -u)/com.bh2voq.ps3eye-vcam"`
+- If the camera isn't detected on a Hackintosh, try a different physical USB port before suspecting the code — `libusb` can be flaky on ports mapped through custom SSDT/kext USB injection.
 
-```text
-~/Library/Logs/PS3Eye-VirtualCam/feed.log
-```
+## Credits
 
-The legacy internal support path and LaunchAgent identifiers are intentionally kept for upgrade compatibility.
+- [inspirit/PS3EYEDriver](https://github.com/inspirit/PS3EYEDriver) — original userspace libusb driver
+- [obs-mac-virtualcam](https://github.com/johnboiles/obs-mac-virtualcam) — OBS virtual camera groundwork
+- [BH2VOQ/PS3-Camera-macOS-Driver](https://github.com/BH2VOQ/PS3-Camera-macOS-Driver) — combined the above with a CoreMediaIO feeder and menu bar app (Apple Silicon build)
 
-## 3. Menu bar app
+## License
 
-The menu bar app defaults to English. You can switch languages from:
-
-```text
-Language
-→ 中文
-```
-
-A typical standby menu is:
-
-```text
-PS3 Eye: Standby (Camera Off)
-Enable Camera
-Open Log
-Language ▶
-Quit Menu Bar App (Background Stays Idle)
-```
-
-### Enable the camera
-
-Click `Enable Camera`. The feeder starts the OBS sink, starts PS3 Eye capture, turns on the LED, and streams at `640×480 @ 30 fps`.
-
-Expected log output:
-
-```text
-[ps3eye-feed] manual switch ON; starting sink + physical camera
-[ps3eye-feed] PS3 Eye streaming 640x480@30 (manual ON)
-[ps3eye-feed] 30 frames sent
-[ps3eye-feed] 60 frames sent
-```
-
-### Use it in QuickTime
-
-```text
-QuickTime Player
-→ File
-→ New Movie Recording
-→ Select OBS Virtual Camera
-```
-
-### Disable the camera
-
-Click `Disable Camera`.
-
-Expected log output:
-
-```text
-[ps3eye-feed] manual switch OFF; physical camera entering standby
-```
-
-The LED turns off and LaunchAgent relaunches a clean feeder process in standby mode.
-
-## 4. Update
-
-Recommended update flow:
-
-```bash
-cd ~/PS3Eye-VirtualCam
-git pull
-./build.sh
-./scripts/install-agent.sh
-./scripts/build-app.sh
-```
-
----
-
-# Logs and troubleshooting
-
-Live log:
-
-```bash
-tail -f "$HOME/Library/Logs/PS3Eye-VirtualCam/feed.log"
-```
-
-Recent log lines:
-
-```bash
-tail -n 50 "$HOME/Library/Logs/PS3Eye-VirtualCam/feed.log"
-```
-
-Clear old logs before a clean test:
-
-```bash
-: > "$HOME/Library/Logs/PS3Eye-VirtualCam/feed.log"
-```
-
-Check the feeder process:
-
-```bash
-pgrep -fl ps3eye-feed
-```
-
-### QuickTime shows no video
-
-Check that:
-
-1. The camera is enabled from the menu bar.
-2. The PS3 Eye LED is on.
-3. The log continuously prints `frames sent`.
-4. QuickTime is using `OBS Virtual Camera`.
-5. OBS Camera Extension is installed and approved by macOS.
-6. The target application has camera permission.
-
-### `Bootstrap failed: 5: Input/output error`
-
-Retry:
-
-```bash
-./scripts/install-agent.sh
-```
-
-Inspect launchd state with:
-
-```bash
-launchctl print "gui/$(id -u)/com.bh2voq.ps3eye-vcam"
-plutil -lint "$HOME/Library/LaunchAgents/com.bh2voq.ps3eye-vcam.plist"
-```
-
-### Old `pthread_mutex_lock` assertion in the log
-
-The log is append-only, so an assertion near the top may belong to an older feeder process. Clear the log and restart before testing:
-
-```bash
-: > "$HOME/Library/Logs/PS3Eye-VirtualCam/feed.log"
-launchctl kickstart -k "gui/$(id -u)/com.bh2voq.ps3eye-vcam"
-```
-
----
-
-# Background management
-
-Restart the feeder:
-
-```bash
-launchctl kickstart -k \
-"gui/$(id -u)/com.bh2voq.ps3eye-vcam"
-```
-
-Uninstall the LaunchAgent:
-
-```bash
-./scripts/uninstall-agent.sh
-```
-
----
-
-# Repository layout
-
-| Path | Purpose |
-|---|---|
-| `src/ps3eye-feed.mm` | PS3 Eye capture, NV12 conversion, CoreMediaIO output, manual state control |
-| `src/ps3eye/` | PS3EYEDriver / OV534 userspace driver |
-| `src/app/PS3EyeVCMenu.m` | macOS menu bar controller |
-| `lib/libusb/` | Static arm64 libusb |
-| `build.sh` | Build the feeder |
-| `scripts/build-app.sh` | Build the menu bar app |
-| `scripts/install-agent.sh` | Install and register the LaunchAgent |
-| `scripts/uninstall-agent.sh` | Remove the LaunchAgent |
-| `.github/workflows/macos-build.yml` | macOS CI build verification |
-
----
-
-# Current design trade-off
-
-> **Stability > full automation**
-
-OBS Camera Extension does not expose a reliable source-client count to the external feeder. Automatic shutdown based on indirect signals caused real disconnect loops, so the current version intentionally uses a manual switch.
-
-A future fully automatic design would require either a dedicated Camera Extension or an explicit client-count IPC channel from the extension to the feeder.
-
----
-
-# License
-
-GPLv2. See [LICENSE](LICENSE).
-
-This project includes and builds on work from PS3EYEDriver, libusb, and OBS virtual camera components.
+GPLv2, inherited from upstream.
