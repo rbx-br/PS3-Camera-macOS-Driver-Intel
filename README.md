@@ -1,4 +1,7 @@
-# 📷 PS3Eye-VirtualCam (Intel)
+<img width="200" height="168" alt="Sony-PlayStation-3-Eye (2)" src="https://github.com/user-attachments/assets/cdd1fcbe-1eac-4c86-b982-e7df747f6483" />
+
+
+# PS3Eye-VirtualCam (Intel)
 
 An Intel/x86_64 build of [BH2VOQ/PS3-Camera-macOS-Driver](https://github.com/BH2VOQ/PS3-Camera-macOS-Driver), which turns a PlayStation 3 Eye camera into a system-wide macOS virtual camera. The upstream project only ships an Apple Silicon (arm64) build; this fork replaces the arm64-only static `libusb` with a Homebrew-linked build so it compiles and runs on Intel Macs and Intel-based Hackintosh systems.
 
